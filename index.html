@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10281a">
+  <title>Vivero Monitor</title>
+
+  <!-- Enlace a la hoja de estilos externa -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Gradientes SVG globales reutilizables -->
+  <svg width="0" height="0" style="position: absolute;">
+    <defs>
+      <linearGradient id="fg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#d4f08c" />
+        <stop offset="1" stop-color="#6fc27a" />
+      </linearGradient>
+      <linearGradient id="ar" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#a6d96b" stop-opacity="0.45" />
+        <stop offset="1" stop-color="#a6d96b" stop-opacity="0" />
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <!-- ==========================================================================
+       VISTA 1: INICIO DE SESIÓN
+       ========================================================================== -->
+  <main id="login" class="wrap login-box">
+    <div class="mark">vivero</div>
+    <p class="login-sub">
+      Monitoreo inteligente para plantas que merecen buen clima.
+    </p>
+
+    <div class="glass card">
+      <label for="em" class="mt-0">Correo</label>
+      <input id="em" type="email" placeholder="operario@vivero.com" autocomplete="email">
+
+      <label for="pw">Contraseña</label>
+      <input id="pw" type="password" autocomplete="current-password" onkeydown="if (event.key === 'Enter') entrar()">
+
+      <p id="err" class="login-err" role="alert"></p>
+      <button class="btn pri btn-full" onclick="entrar()">Iniciar sesión</button>
+    </div>
+
+    <p id="demo" class="mu mt-16 text-center">
+      Modo demo: cualquier correo y contraseña de 4 o más caracteres. Datos simulados.
+    </p>
+  </main>
+
+  <!-- ==========================================================================
+       VISTA 2: APLICACIÓN PRINCIPAL (DASHBOARD)
+       ========================================================================== -->
+  <div id="app" class="hide">
+    <div class="wrap">
+      <!-- Barra superior de usuario -->
+      <div class="bar">
+        <div class="logo">
+          <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+            <path d="M4 22C4 11 11 4 22 4c0 11-7 18-18 18Z" fill="url(#fg)" />
+            <path d="M5 21 15 11" stroke="#10281a" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+          vivero
+        </div>
+        <div class="who">
+          <span id="usr" class="mu"></span>
+          <button class="btn" onclick="salir()">Salir</button>
+        </div>
+      </div>
+
+      <!-- Pestañas de navegación -->
+      <nav id="nav" class="seg glass" aria-label="Secciones"></nav>
+
+      <!-- Contenedor dinámico de la vista activa -->
+      <div id="v"></div>
+    </div>
+  </div>
+
+  <!-- Modal emergente para detalle de planta -->
+  <div id="sheet" class="hide" onclick="cerrar()"></div>
+
+  <!-- Enlace al archivo de lógica (JavaScript) -->
+  <script src="firebase-config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

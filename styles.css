@@ -1,0 +1,549 @@
+/* ==========================================================================
+   1. VARIABLES Y RESET GENERAL
+   ========================================================================== */
+:root {
+  --tx: #f2f7ef;
+  --mu: rgba(242, 247, 239, 0.68);
+  --fern: #a6d96b;
+  --amb: #f2b84b;
+  --cor: #ff7d6e;
+  --aqua: #7fd0ee;
+  --ink: #0d1f15;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+body {
+  font: 400 15px/1.5 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  color: var(--tx);
+  min-height: 100vh;
+  background-color: #14492f;
+  background-image: 
+    radial-gradient(1100px 650px at 90% -8%, rgba(125, 205, 150, 0.5), transparent 62%),
+    radial-gradient(900px 600px at 5% 105%, rgba(6, 40, 28, 0.85), transparent 60%),
+    linear-gradient(160deg, #21603f 0%, #14492f 48%, #0a2c1f 100%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+/* ==========================================================================
+   2. CONTENEDORES Y EFECTO GLASSMORPHISM
+   ========================================================================== */
+.glass {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.07));
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 10px 34px rgba(0, 18, 8, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  border-radius: 26px;
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .glass {
+    background: rgba(20, 48, 32, 0.82);
+  }
+}
+
+.wrap {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px 16px 64px;
+}
+
+.card {
+  padding: 22px;
+}
+
+.mu {
+  color: var(--mu);
+  font-size: 0.88rem;
+}
+
+h3 {
+  font-weight: 500;
+  font-size: 1.05rem;
+}
+
+/* ==========================================================================
+   3. NAVEGACIÓN Y ENCABEZADOS
+   ========================================================================== */
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.logo {
+  font-weight: 200;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.who {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.seg {
+  display: flex;
+  padding: 5px;
+  border-radius: 99px;
+  margin: 22px auto 26px;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.seg button {
+  background: none;
+  border: 0;
+  color: var(--mu);
+  padding: 9px 20px;
+  border-radius: 99px;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s, color 0.2s;
+}
+
+.seg .on {
+  background: var(--ink);
+  color: var(--tx);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.hero {
+  font-weight: 200;
+  font-size: clamp(32px, 7vw, 54px);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+
+.mark {
+  font-weight: 200;
+  font-size: clamp(68px, 17vw, 128px);
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 12px;
+}
+
+.stack > * + * {
+  margin-top: 14px;
+}
+
+/* ==========================================================================
+   4. BOTONES, FORMULARIOS Y ENTRADAS
+   ========================================================================== */
+.btn {
+  padding: 10px 20px;
+  border-radius: 99px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--tx);
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn.pri {
+  background: linear-gradient(135deg, #9c2a3f, #6e1626);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.28);
+  font-weight: 600;
+  box-shadow: 0 6px 20px rgba(110, 22, 38, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.btn:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.btn.pri:hover {
+  background: linear-gradient(135deg, #b3334a, #7d1a2d);
+}
+
+:focus-visible {
+  outline: 3px solid var(--fern);
+  outline-offset: 2px;
+}
+
+input[type=text],
+input[type=email],
+input[type=password] {
+  width: 100%;
+  padding: 13px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--tx);
+  font: inherit;
+}
+
+input::placeholder {
+  color: rgba(242, 247, 239, 0.45);
+}
+
+input[type=range] {
+  width: 100%;
+  accent-color: var(--fern);
+}
+
+label {
+  display: block;
+  margin: 14px 0 6px;
+  font-size: 0.9rem;
+  color: var(--mu);
+}
+
+summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+pre {
+  background: rgba(0, 0, 0, 0.35);
+  padding: 12px;
+  border-radius: 14px;
+  overflow: auto;
+  font-size: 0.78rem;
+  margin-top: 10px;
+}
+
+/* ==========================================================================
+   5. BADGES, ALARMAS Y ESTADOS
+   ========================================================================== */
+.pill {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 13px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 0.88rem;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--c, var(--fern));
+  box-shadow: 0 0 10px var(--c, var(--fern));
+}
+
+.s0 { --c: var(--fern); }
+.s1 { --c: var(--amb); }
+.s2 { --c: var(--cor); }
+
+.warn {
+  background: rgba(242, 184, 75, 0.16);
+  border: 1px solid rgba(242, 184, 75, 0.5);
+  padding: 10px 14px;
+  border-radius: 16px;
+  margin-top: 10px;
+  font-size: 0.9rem;
+}
+
+.log div {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.log div:last-child {
+  border: 0;
+}
+
+.log span:last-child {
+  margin-left: auto;
+  color: var(--mu);
+  font-size: 0.85rem;
+}
+
+/* ==========================================================================
+   6. TACÓMETROS CIRCULARES Y MEDIDORES
+   ========================================================================== */
+.rings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 14px;
+  margin: 26px 0 14px;
+}
+
+.rings .card {
+  text-align: center;
+}
+
+.ring {
+  width: 100%;
+  max-width: 230px;
+  display: block;
+  margin: 0 auto;
+}
+
+.num {
+  font-size: 54px;
+  font-weight: 200;
+  fill: var(--tx);
+  letter-spacing: -0.03em;
+}
+
+.unit {
+  font-size: 15px;
+  fill: var(--mu);
+}
+
+.dr {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: dr 1.3s 0.15s cubic-bezier(0.3, 0.7, 0.2, 1) forwards;
+}
+
+@keyframes dr {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.mb {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.16);
+  margin: 5px 0 11px;
+}
+
+.mb i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  background: var(--fern);
+}
+
+.mb.h i {
+  background: var(--aqua);
+}
+
+/* ==========================================================================
+   7. GRIDS DE PLANTAS Y TARJETAS
+   ========================================================================== */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(235px, 1fr));
+  gap: 14px;
+}
+
+.pl {
+  padding: 18px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.pl.sel {
+  border-color: var(--fern);
+  box-shadow: 0 10px 34px rgba(0, 18, 8, 0.38), 0 0 0 1px var(--fern), 0 0 28px rgba(166, 217, 107, 0.25);
+}
+
+.pl .top {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.tg {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--tx);
+  font-size: 1.1rem;
+  cursor: pointer;
+  flex: none;
+  transition: background 0.2s, color 0.2s;
+}
+
+.sel .tg {
+  background: var(--fern);
+  color: var(--ink);
+  border-color: transparent;
+}
+
+.pg {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+  gap: 14px;
+}
+
+.pc {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 12px;
+  border-radius: 30px;
+  cursor: pointer;
+  transition: transform 0.25s, box-shadow 0.25s;
+}
+
+.pc:hover {
+  transform: translateY(-4px);
+}
+
+.pc::before {
+  content: "";
+  position: absolute;
+  inset: 9px;
+  border-radius: 23px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+}
+
+.pc svg {
+  width: 100%;
+  display: block;
+  filter: drop-shadow(0 10px 10px rgba(0, 0, 0, 0.22));
+}
+
+.pc .ft {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 6px 0;
+}
+
+.pc .tg {
+  background: rgba(8, 30, 20, 0.55);
+}
+
+.pc.sel {
+  border-color: var(--fern);
+  box-shadow: 0 10px 34px rgba(0, 18, 8, 0.38), 0 0 0 1px var(--fern), 0 0 30px rgba(166, 217, 107, 0.28);
+}
+
+.badge {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #7ff0c3;
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  z-index: 1;
+}
+
+/* ==========================================================================
+   8. MODAL SHEET Y UTILIDADES
+   ========================================================================== */
+#sheet {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 22, 13, 0.55);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  z-index: 5;
+  overflow: auto;
+}
+
+#sheet.hide,
+.hide {
+  display: none !important;
+}
+
+/* Estilos para login */
+.login-box {
+  max-width: 440px;
+  padding-top: 9vh;
+}
+
+.login-sub {
+  font-weight: 300;
+  font-size: 1.15rem;
+  margin: 8px 0 28px;
+  color: var(--mu);
+}
+
+.login-err {
+  color: var(--cor);
+  min-height: 1.5em;
+  margin: 8px 0;
+}
+
+.btn-full {
+  width: 100%;
+  padding: 13px;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.mt-0 {
+  margin-top: 0 !important;
+}
+
+.mt-16 {
+  margin-top: 16px !important;
+}
+
+/* Modal dialog */
+.sheet-card {
+  max-width: 380px;
+  width: 100%;
+}
+
+.plant-preview {
+  width: 140px;
+  margin: 0 auto;
+}
+
+.plant-title {
+  font-size: 1.5rem;
+  font-weight: 300;
+  text-align: center;
+  margin: 6px 0 16px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dr {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .pc {
+    transition: none;
+  }
+  .pc:hover {
+    transform: none;
+  }
+}
