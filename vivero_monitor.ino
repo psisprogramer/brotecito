@@ -1,4 +1,18 @@
 /*
+ * Monitor ambiental para vivero de plántulas - ESP32 + DHT22
+ * ===========================================================
+ *  - Lectura no bloqueante (millis) con validación en 4 capas
+ *  - Máquina de estados del sensor (tolera fallos aislados, se recupera solo)
+ *  - 7 alarmas con 2 severidades, histéresis y confirmación
+ *  - Buzzer con patrón propio por alarma + LED verde/rojo
+ *  - Botón BOOT (GPIO 0) para silenciar la alarma sonora
+ *  - Notificaciones al celular por Telegram en una tarea separada (núcleo 0)
+ *  - Watchdog, monitoreo de RAM y modo simulación por Serial
+ *
+ * Librerías (Gestor de librerías): "DHT sensor library" y "Adafruit Unified Sensor"
+ * Placa: ESP32 (core de Espressif 2.x o 3.x). Monitor serial: 115200.
+ * Crear secrets.h en la misma carpeta (ver plantilla).
+ *
  * Comandos por Serial:
  *   sim <temp> <hum>   -> simula esos valores (ej: sim 36 70)
  *   sim fallo          -> simula sensor desconectado
@@ -14,14 +28,18 @@
 #include <time.h>
 #include <esp_task_wdt.h>
 #include <esp_system.h>
+#include <Preferences.h>
 #include "secrets.h"
 
+// =====================================================================
+//  CONFIGURACIÓN  (todo lo ajustable está aquí)
+// =====================================================================
 
 // --- Pines (poner -1 en un LED que no tengas) ---
 const int8_t PIN_DHT       = 22;
-const int8_t PIN_BUZZER    = 23;
-const int8_t PIN_LED_VERDE = 26;
-const int8_t PIN_LED_ROJO  = 25;
+const int8_t PIN_BUZZER    = 18;
+const int8_t PIN_LED_VERDE = 19;
+const int8_t PIN_LED_ROJO  = 21;
 const int8_t PIN_BOTON     = 0;     // botón BOOT de la placa
 
 const bool BUZZER_ACTIVO_EN_ALTO = true;   // false si suena con LOW
@@ -36,11 +54,14 @@ const float    MAX_SALTO_T          = 8.0f;      // °C entre dos muestras (2 s)
 const float    MAX_SALTO_H          = 20.0f;     // % entre dos muestras
 const uint8_t  MAX_SALTOS_SEGUIDOS  = 3;         // al 3er salto seguido se acepta como real
 
-// --- Umbrales de alarma (EJEMPLO: ajustar según la especie del vivero) ---
-const float T_ALTA_ADV = 30.0f, T_ALTA_CRIT = 35.0f;
-const float T_BAJA_ADV = 12.0f, T_BAJA_CRIT =  5.0f;
-const float H_ALTA_ADV = 85.0f, H_ALTA_CRIT = 95.0f;
-const float H_BAJA_ADV = 50.0f, H_BAJA_CRIT = 35.0f;
+// --- Umbrales por defecto (la app los reemplaza según las plantas elegidas) ---
+float T_ALTA_ADV = 27.0f, T_ALTA_CRIT = 30.0f;
+float T_BAJA_ADV = 15.0f, T_BAJA_CRIT = 10.0f;
+float H_ALTA_ADV = 90.0f, H_ALTA_CRIT = 97.0f;
+float H_BAJA_ADV = 60.0f, H_BAJA_CRIT = 45.0f;
+float* const PUMB[8] = {&T_BAJA_ADV, &T_BAJA_CRIT, &T_ALTA_ADV, &T_ALTA_CRIT, &H_BAJA_ADV, &H_BAJA_CRIT, &H_ALTA_ADV, &H_ALTA_CRIT};
+// Riesgo de hongos (damping-off): calor + humedad alta a la vez
+const float HONGOS_T = 24.0f, HONGOS_H_ADV = 85.0f, HONGOS_H_CRIT = 95.0f;
 const float HIST_T = 1.0f;       // histéresis de temperatura (°C)
 const float HIST_H = 3.0f;       // histéresis de humedad (%)
 const float LIM_RATE_T = 3.0f;   // °C por minuto  (advertencia; crítica = el doble)
@@ -60,13 +81,16 @@ const long     ZONA_HORARIA_S = -5L * 3600;         // Colombia (UTC-5, sin hora
 
 const uint8_t TAM_BUFFER = 30;     // 30 muestras x 2 s = 1 minuto de historia
 
+// =====================================================================
+//  TIPOS Y DATOS
+// =====================================================================
 
 typedef uint8_t Sev;
 const Sev SEV_NINGUNA = 0, SEV_ADVERTENCIA = 1, SEV_CRITICA = 2;
 
-
+// El orden define la prioridad (la primera con mayor severidad es la "dominante")
 enum Alarma : uint8_t {
-  AL_SENSOR_FALLA, AL_TEMP_ALTA, AL_TEMP_BAJA, AL_HUM_ALTA, AL_HUM_BAJA,
+  AL_SENSOR_FALLA, AL_TEMP_ALTA, AL_RIESGO_HONGOS, AL_TEMP_BAJA, AL_HUM_ALTA, AL_HUM_BAJA,
   AL_CAMBIO_BRUSCO, AL_SENSOR_CONGELADO, AL_TOTAL
 };
 
@@ -81,6 +105,7 @@ struct Notif   { uint32_t ms; char texto[220]; };
 // Patrones del buzzer (ms): ON, OFF, ON, OFF... el último OFF es la pausa de repetición
 const uint16_t P_SENSOR_FALLA[]      = {1500, 1000};
 const uint16_t P_TEMP_ALTA[]         = {150, 150, 150, 150, 150, 1200};      // 3 cortos
+const uint16_t P_RIESGO_HONGOS[]      = {120, 120, 120, 1200};                // 2 cortos
 const uint16_t P_TEMP_BAJA[]         = {600, 300, 600, 1200};                // 2 largos
 const uint16_t P_HUM_ALTA[]          = {150, 150, 600, 1200};                // corto-largo
 const uint16_t P_HUM_BAJA[]          = {600, 150, 150, 1200};                // largo-corto
@@ -88,17 +113,18 @@ const uint16_t P_CAMBIO_BRUSCO[]     = {80, 80, 80, 80, 80, 80, 80, 1200};   // 
 const uint16_t P_SENSOR_CONGELADO[]  = {300, 2000};
 
 const Patron PATRONES[AL_TOTAL] = {
-  PAT(P_SENSOR_FALLA), PAT(P_TEMP_ALTA), PAT(P_TEMP_BAJA), PAT(P_HUM_ALTA),
+  PAT(P_SENSOR_FALLA), PAT(P_TEMP_ALTA), PAT(P_RIESGO_HONGOS), PAT(P_TEMP_BAJA), PAT(P_HUM_ALTA),
   PAT(P_HUM_BAJA), PAT(P_CAMBIO_BRUSCO), PAT(P_SENSOR_CONGELADO)
 };
 
 const char* const NOMBRE_ALARMA[AL_TOTAL] = {
-  "SENSOR SIN RESPUESTA", "TEMPERATURA ALTA", "TEMPERATURA BAJA", "HUMEDAD ALTA",
+  "SENSOR SIN RESPUESTA", "TEMPERATURA ALTA", "RIESGO DE HONGOS", "TEMPERATURA BAJA", "HUMEDAD ALTA",
   "HUMEDAD BAJA", "CAMBIO BRUSCO", "SENSOR CONGELADO"
 };
 const char* const DETALLE_ALARMA[AL_TOTAL] = {
   "No hay lecturas validas. Revisar cableado y alimentacion.",
   "Riesgo de estres termico en las plantulas.",
+  "Calor con humedad alta: riesgo de hongos (damping-off).",
   "Riesgo de dano por frio.",
   "Riesgo de hongos y enfermedades.",
   "Riesgo de deshidratacion.",
@@ -150,6 +176,9 @@ uint8_t lineaN = 0;
 QueueHandle_t colaNotif;
 volatile bool wifiOk = false;
 
+// =====================================================================
+//  UTILIDADES BÁSICAS
+// =====================================================================
 
 inline void led(int8_t pin, bool on) { if (pin >= 0) digitalWrite(pin, on ? HIGH : LOW); }
 
@@ -194,6 +223,10 @@ const char* motivoReinicio() {
     default:               return "otro";
   }
 }
+
+// =====================================================================
+//  NOTIFICACIONES (cola + tarea de red en el núcleo 0)
+// =====================================================================
 
 void encolar(const char* texto) {
   Notif n;
@@ -251,6 +284,160 @@ bool enviarTelegram(const Notif& n) {
   return code == 200;
 }
 
+// =====================================================================
+//  FIREBASE (Realtime Database por REST) - corre en la tarea de red
+// =====================================================================
+struct Evento { uint32_t ms; uint8_t alarma; uint8_t sev; float t; float h; };
+struct Snap   { float t; float h; uint8_t sev; int8_t dom; uint8_t sensor; bool valido; };
+QueueHandle_t colaEventos;
+Snap snap = {0, 0, 0, -1, 0, false};
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+char fbToken[1400];
+bool fbTokenOk = false;
+uint32_t fbTokenMs = 0;
+const char* const NOMBRE_SENSOR[3] = {"INICIANDO", "OK", "FALLA"};
+Preferences prefs;
+
+void guardarUmbrales() {
+  float v[8]; for (uint8_t i = 0; i < 8; i++) v[i] = *PUMB[i];
+  prefs.begin("umbrales", false); prefs.putBytes("v", v, sizeof(v)); prefs.end();
+}
+void cargarUmbrales() {
+  float v[8];
+  prefs.begin("umbrales", true);
+  bool ok = prefs.getBytesLength("v") == sizeof(v);
+  if (ok) prefs.getBytes("v", v, sizeof(v));
+  prefs.end();
+  if (ok) { for (uint8_t i = 0; i < 8; i++) *PUMB[i] = v[i]; Serial.println("[CFG] umbrales cargados de la memoria"); }
+}
+
+void publicarEvento(uint8_t a, uint8_t sv) {
+  Evento e = {millis(), a, sv, tFilt, hFilt};
+  if (xQueueSend(colaEventos, &e, 0) != pdTRUE) { Evento d; xQueueReceive(colaEventos, &d, 0); xQueueSend(colaEventos, &e, 0); }
+}
+
+bool jsonNum(const String& j, const char* k, float& out) {
+  char key[32]; snprintf(key, sizeof(key), "\"%s\":", k);
+  int i = j.indexOf(key);
+  if (i < 0) return false;
+  out = j.substring(i + strlen(key)).toFloat();
+  return true;
+}
+
+// Recibe los umbrales calculados por la app (según las plantas elegidas)
+void aplicarConfig(const String& r) {
+  const char* k[8] = {"t_baja_adv", "t_baja_crit", "t_alta_adv", "t_alta_crit", "h_baja_adv", "h_baja_crit", "h_alta_adv", "h_alta_crit"};
+  float v[8];
+  for (uint8_t i = 0; i < 8; i++) if (!jsonNum(r, k[i], v[i])) return;          // incompleta: se ignora
+  if (!(v[1] < v[0] && v[0] < v[2] && v[2] < v[3] && v[5] < v[4] && v[4] < v[6] && v[6] < v[7])) {
+    Serial.println("[CFG] umbrales incoherentes, ignorados"); return;
+  }
+  bool cambio = false;
+  for (uint8_t i = 0; i < 8; i++) if (fabsf(*PUMB[i] - v[i]) > 0.01f) cambio = true;
+  if (!cambio) return;
+  for (uint8_t i = 0; i < 8; i++) *PUMB[i] = v[i];
+  guardarUmbrales();
+  char msg[160];
+  snprintf(msg, sizeof(msg), "⚙️ Umbrales actualizados desde la app\nTemp: %.0f a %.0f °C | Hum: %.0f a %.0f %%", T_BAJA_ADV, T_ALTA_ADV, H_BAJA_ADV, H_ALTA_ADV);
+  encolar(msg);
+  Serial.println("[CFG] umbrales actualizados");
+}
+
+int fbPedir(const char* metodo, const char* ruta, const char* cuerpo, String* resp) {
+  char url[1500];
+  snprintf(url, sizeof(url), "%s%s.json?auth=%s", FB_DB_URL, ruta, fbToken);
+  WiFiClientSecure c; c.setInsecure();
+  HTTPClient h;
+  if (!h.begin(c, url)) return -1;
+  h.setTimeout(8000);
+  h.addHeader("Content-Type", "application/json");
+  int code = h.sendRequest(metodo, (uint8_t*)cuerpo, cuerpo ? strlen(cuerpo) : 0);
+  if (resp && code > 0) *resp = h.getString();
+  Serial.printf("[FB] %s %s -> HTTP %d\n", metodo, ruta, code);
+  h.end();
+  return code;
+}
+
+bool fbLogin() {
+  char url[200], body[260];
+  snprintf(url, sizeof(url), "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=%s", FB_API_KEY);
+  snprintf(body, sizeof(body), "{\"email\":\"%s\",\"password\":\"%s\",\"returnSecureToken\":true}", FB_DEVICE_EMAIL, FB_DEVICE_PASS);
+  WiFiClientSecure c; c.setInsecure();
+  HTTPClient h;
+  if (!h.begin(c, url)) return false;
+  h.setTimeout(8000);
+  h.addHeader("Content-Type", "application/json");
+  int code = h.POST((uint8_t*)body, strlen(body));
+  String r = h.getString();
+  h.end();
+  if (code != 200) { Serial.printf("[FB] login HTTP %d: %s\n", code, r.c_str()); return false; }
+  int i = r.indexOf("\"idToken\"");
+  if (i < 0) return false;
+  i = r.indexOf(':', i); if (i < 0) return false;
+  i = r.indexOf('"', i); if (i < 0) return false;
+  i++;
+  int j = r.indexOf('"', i);
+  if (j < 0 || j - i >= (int)sizeof(fbToken)) return false;
+  r.substring(i, j).toCharArray(fbToken, sizeof(fbToken));
+  fbTokenMs = millis(); fbTokenOk = true;
+  Serial.println("[FB] sesion iniciada");
+  return true;
+}
+
+// Una tarea pequeña por vuelta: eventos de alarma > lectura actual > historial > configuración
+void firebaseCiclo() {
+  if (strcmp(FB_API_KEY, "TU_API_KEY") == 0) return;            // Firebase sin configurar
+  static uint32_t tAct = 0, tHist = 0, tCfg = 0, tLogin = 0;
+  static bool cfgInicial = false;
+  uint32_t now = millis();
+
+  if (!fbTokenOk || now - fbTokenMs > 50UL * 60 * 1000) {
+    if (tLogin && now - tLogin < 15000) return;
+    tLogin = now;
+    if (!fbLogin()) return;
+  }
+
+  Evento e;
+  if (xQueuePeek(colaEventos, &e, 0) == pdTRUE) {
+    char b[220];
+    snprintf(b, sizeof(b), "{\"alarma\":\"%s\",\"sev\":%u,\"t\":%.1f,\"h\":%.1f,\"ts\":{\".sv\":\"timestamp\"}}", NOMBRE_ALARMA[e.alarma], e.sev, e.t, e.h);
+    int c = fbPedir("POST", "/alarmas", b, nullptr);
+    if (c == 200) xQueueReceive(colaEventos, &e, 0); else if (c == 401) fbTokenOk = false;
+    return;
+  }
+
+  Snap s;
+  portENTER_CRITICAL(&mux); s = snap; portEXIT_CRITICAL(&mux);
+
+  if (now - tAct >= 10000) {
+    tAct = now;
+    char tb[16], hb[16], b[320];
+    if (s.valido) { snprintf(tb, sizeof(tb), "%.1f", s.t); snprintf(hb, sizeof(hb), "%.1f", s.h); }
+    else { strcpy(tb, "null"); strcpy(hb, "null"); }
+    snprintf(b, sizeof(b), "{\"t\":%s,\"h\":%s,\"sev\":%u,\"alarma\":\"%s\",\"sensor\":\"%s\",\"rssi\":%d,\"heap\":%u,\"up\":%lu,\"ts\":{\".sv\":\"timestamp\"}}",
+             tb, hb, s.sev, s.dom < 0 ? "NINGUNA" : NOMBRE_ALARMA[s.dom], NOMBRE_SENSOR[s.sensor], WiFi.RSSI(),
+             (unsigned)(ESP.getFreeHeap() / 1024), (unsigned long)(now / 1000));
+    int c = fbPedir("PUT", "/lecturas/actual", b, nullptr);
+    if (c == 401) fbTokenOk = false;
+    return;
+  }
+  if (now - tHist >= 60000 && s.valido) {
+    tHist = now;
+    char b[120];
+    snprintf(b, sizeof(b), "{\"t\":%.1f,\"h\":%.1f,\"ts\":{\".sv\":\"timestamp\"}}", s.t, s.h);
+    int c = fbPedir("POST", "/historial", b, nullptr);
+    if (c == 401) fbTokenOk = false;
+    return;
+  }
+  if (!cfgInicial || now - tCfg >= 60000) {
+    cfgInicial = true; tCfg = now;
+    String r;
+    int c = fbPedir("GET", "/config/umbrales", nullptr, &r);
+    if (c == 200 && r.length() > 4 && r != "null") aplicarConfig(r);
+    else if (c == 401) fbTokenOk = false;
+  }
+}
+
 void tareaRed(void*) {
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
@@ -287,6 +474,7 @@ void tareaRed(void*) {
         vTaskDelay(pdMS_TO_TICKS(5000));
       }
     } else {
+      firebaseCiclo();
       vTaskDelay(pdMS_TO_TICKS(250));
     }
   }
@@ -320,6 +508,10 @@ void enviarReporte(uint32_t now) {
   }
   encolar(msg);
 }
+
+// =====================================================================
+//  ALARMAS
+// =====================================================================
 
 // Severidad de un valor frente a umbrales, con histéresis.
 // alta=true: peor cuanto mayor es v.  alta=false: peor cuanto menor es v.
@@ -365,6 +557,7 @@ void aplicarAlarma(Alarma a, Sev cand, uint32_t now) {
     if (sev[a] > ant) silencioActivo = false;      // alarma nueva o más grave: se cancela el silencio
     Serial.printf("[ALARMA] %s: %s -> %s\n", NOMBRE_ALARMA[a], NOMBRE_SEV[ant], NOMBRE_SEV[sev[a]]);
     notificarAlarma(a, ant, sev[a], "");
+    publicarEvento(a, sev[a]);
   }
 }
 
@@ -386,6 +579,8 @@ void evaluarAlarmasValores(uint32_t now) {
   aplicarAlarma(AL_TEMP_BAJA, evalUmbral(tFilt, T_BAJA_ADV, T_BAJA_CRIT, HIST_T, false, sev[AL_TEMP_BAJA]), now);
   aplicarAlarma(AL_HUM_ALTA,  evalUmbral(hFilt, H_ALTA_ADV, H_ALTA_CRIT, HIST_H, true,  sev[AL_HUM_ALTA]),  now);
   aplicarAlarma(AL_HUM_BAJA,  evalUmbral(hFilt, H_BAJA_ADV, H_BAJA_CRIT, HIST_H, false, sev[AL_HUM_BAJA]),  now);
+  aplicarAlarma(AL_RIESGO_HONGOS, (tFilt >= HONGOS_T - (sev[AL_RIESGO_HONGOS] ? HIST_T : 0)) ?
+                evalUmbral(hFilt, HONGOS_H_ADV, HONGOS_H_CRIT, HIST_H, true, sev[AL_RIESGO_HONGOS]) : SEV_NINGUNA, now);
 
   Sev c = SEV_NINGUNA;
   float dT, dH;
@@ -414,7 +609,9 @@ void recordatorios(uint32_t now) {
   }
 }
 
-
+// =====================================================================
+//  LECTURA Y VALIDACIÓN DEL SENSOR
+// =====================================================================
 
 void imprimirEstado() {
   int8_t d = alarmaDominante();
@@ -515,7 +712,9 @@ void procesarLectura(uint32_t now) {
   registrarAcierto(now, t, h);
 }
 
-
+// =====================================================================
+//  SALIDAS: BUZZER Y LEDS (no bloqueantes)
+// =====================================================================
 
 void actualizarBuzzer(uint32_t now) {
   int8_t dom = alarmaDominante();
@@ -560,8 +759,8 @@ void actualizarLeds(uint32_t now) {
   bool v = false, r = false;
   if (!hayDatos && estadoSensor != SENS_FALLA) v = (now / 500) % 2 == 0;     // iniciando: verde parpadea
   else if (g == SEV_NINGUNA)                   v = true;                      // todo normal
-  else if (g == SEV_ADVERTENCIA)               r = (now / 500) % 2 == 0;      // rojo lento
-  else                                         r = (now / 125) % 2 == 0;      // rojo rápido
+  else if (g == SEV_ADVERTENCIA)               r = (now / (alarmaDominante() == AL_RIESGO_HONGOS ? 150 : 500)) % 2 == 0;  // hongos: rápido, resto: lento
+  else                                         r = true;                      // crítica: rojo fijo
   led(PIN_LED_VERDE, v);
   led(PIN_LED_ROJO, r);
 }
@@ -581,7 +780,9 @@ void leerBoton(uint32_t now) {
   botonPrev = presionado;
 }
 
-
+// =====================================================================
+//  COMANDOS POR SERIAL (pruebas)
+// =====================================================================
 
 void ejecutarComando(const char* c, uint32_t now) {
   float t, h;
@@ -606,6 +807,14 @@ void leerSerial(uint32_t now) {
   }
 }
 
+// =====================================================================
+//  SETUP / LOOP
+// =====================================================================
+
+void actualizarSnapshot() {
+  Snap n = {ultT, ultH, severidadGlobal(), alarmaDominante(), (uint8_t)estadoSensor, hayDatos};
+  portENTER_CRITICAL(&mux); snap = n; portEXIT_CRITICAL(&mux);
+}
 
 void setup() {
   buzzerSet(false);
@@ -640,6 +849,8 @@ void setup() {
   dht.begin();
 
   colaNotif = xQueueCreate(8, sizeof(Notif));
+  colaEventos = xQueueCreate(10, sizeof(Evento));
+  cargarUmbrales();
   xTaskCreatePinnedToCore(tareaRed, "red", 12288, NULL, 1, NULL, 0);
 
   char msg[120];
@@ -664,6 +875,7 @@ void loop() {
   }
 
   evaluarAlarmasSensor(now);
+  actualizarSnapshot();
   recordatorios(now);
   actualizarBuzzer(now);
   actualizarLeds(now);
